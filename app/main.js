@@ -610,6 +610,40 @@ function appendMp3Samples(encoder, samples, mp3Chunks) {
 
 /* ================== Main synthesis ================== */
 
+function splitVoiceSegments(text, defaultVoiceId) {
+  const segments = [];
+  let activeVoiceId = defaultVoiceId;
+  let buffer = '';
+
+  const flush = () => {
+    const value = buffer;
+    buffer = '';
+    if (!value.trim()) return;
+
+    const previous = segments[segments.length - 1];
+    if (previous && previous.voiceId === activeVoiceId) {
+      previous.text += value;
+    } else {
+      segments.push({ voiceId: activeVoiceId, text: value });
+    }
+  };
+
+  for (const char of text) {
+    if (char === '®') {
+      flush();
+      activeVoiceId = 'F1';
+    } else if (char === '©') {
+      flush();
+      activeVoiceId = defaultVoiceId;
+    } else {
+      buffer += char;
+    }
+  }
+
+  flush();
+  return segments;
+}
+
 async function generateSpeech() {
   hideError();
   const text = dom.text.value.trim();
@@ -630,6 +664,7 @@ async function generateSpeech() {
 
   const totalStep = clampInt(dom.totalStep.value, 4, 16, 8);
   const speed = clampFloat(dom.speed.value, 0.7, 1.8, 1.05);
+  const segments = splitVoiceSegments(text, state.voiceId);
 
   dom.generateBtn.disabled = true;
   dom.generateBtn.classList.add('is-busy');
@@ -643,29 +678,47 @@ async function generateSpeech() {
   }, 100);
 
   try {
-    const style = await ensureStyleLoaded(state.voiceId);
     dom.generateLabel.textContent = 'MP3 인코더 준비 중…';
     const lamejs = await loadLameJs();
     const encoder = new lamejs.Mp3Encoder(1, state.tts.sampleRate, 128);
     const mp3Chunks = [];
+    let totalDuration = 0;
 
-    const result = await state.tts.call(
-      text,
-      state.lang,
-      style,
-      totalStep,
-      speed,
-      0.3,
-      (step, total) => {
-        dom.generateLabel.textContent = t('btn_generating_progress', { step, total });
-      },
-      (audioPart, chunkIndex, chunkTotal) => {
-        appendMp3Samples(encoder, audioPart, mp3Chunks);
-        if (chunkIndex && chunkTotal) {
-          dom.generateLabel.textContent = `음성 생성 중… ${chunkIndex.toLocaleString()} / ${chunkTotal.toLocaleString()}`;
-        }
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+      const segment = segments[segmentIndex];
+      const style = await ensureStyleLoaded(segment.voiceId);
+
+      // Keep a short natural pause when the voice changes.
+      if (segmentIndex > 0) {
+        appendMp3Samples(
+          encoder,
+          new Float32Array(Math.floor(state.tts.sampleRate * 0.25)),
+          mp3Chunks
+        );
+        totalDuration += 0.25;
       }
-    );
+
+      const result = await state.tts.call(
+        segment.text,
+        state.lang,
+        style,
+        totalStep,
+        speed,
+        0.3,
+        (step, total) => {
+          dom.generateLabel.textContent =
+            `음성 생성 중… ${segmentIndex + 1}/${segments.length} 구간`;
+        },
+        (audioPart, chunkIndex, chunkTotal) => {
+          appendMp3Samples(encoder, audioPart, mp3Chunks);
+          if (chunkIndex && chunkTotal) {
+            dom.generateLabel.textContent =
+              `음성 생성 중… ${segmentIndex + 1}/${segments.length} 구간 · ${chunkIndex.toLocaleString()}/${chunkTotal.toLocaleString()} 문장`;
+          }
+        }
+      );
+      totalDuration += result.duration[0];
+    }
 
     const finalChunk = encoder.flush();
     if (finalChunk.length) mp3Chunks.push(new Uint8Array(finalChunk));
@@ -679,7 +732,7 @@ async function generateSpeech() {
     dom.transcript.textContent = text;
     saveGenerationEstimate((performance.now() - start) / 1000, text.length);
     updateGenerationEstimate();
-    dom.statAudio.textContent = t('output_audio_stat', { seconds: result.duration[0].toFixed(2) });
+    dom.statAudio.textContent = t('output_audio_stat', { seconds: totalDuration.toFixed(2) });
     dom.statGen.textContent = t('output_gen_stat', {
       seconds: ((performance.now() - start) / 1000).toFixed(2)
     });
