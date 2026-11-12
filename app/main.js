@@ -104,6 +104,7 @@ const dom = {
   speed: $('#speed'),
   generateBtn: $('#generateBtn'),
   generateLabel: $('#generateLabel'),
+  genTimer: $('#genTimer'),
   errorMsg: $('#errorMsg'),
   output: $('#output'),
   audio: $('#audio'),
@@ -541,6 +542,11 @@ async function generateSpeech() {
   dom.generateLabel.textContent = t('btn_generating');
 
   const start = performance.now();
+  dom.genTimer.hidden = false;
+  dom.genTimer.textContent = '생성 시간: 0.0초';
+  const timerId = window.setInterval(() => {
+    dom.genTimer.textContent = `생성 시간: ${((performance.now() - start) / 1000).toFixed(1)}초`;
+  }, 100);
   try {
     const style = await ensureStyleLoaded(state.voiceId);
     const { wav, duration } = await state.tts.call(
@@ -575,6 +581,8 @@ async function generateSpeech() {
     console.error(err);
     showError(t('error_generation', { error: err.message }));
   } finally {
+    window.clearInterval(timerId);
+    dom.genTimer.textContent = `총 생성 시간: ${((performance.now() - start) / 1000).toFixed(2)}초`;
     dom.generateBtn.disabled = false;
     dom.generateBtn.classList.remove('is-busy');
     dom.generateLabel.textContent = t('btn_speak');
