@@ -1051,6 +1051,15 @@ input[type="range"]::-moz-range-thumb:hover {
   to { transform: rotate(360deg); }
 }
 
+.gen-timer {
+  color: var(--ink-soft);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  text-align: center;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .error-msg {
   color: var(--danger);
   font-size: var(--t-sm);
