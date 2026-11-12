@@ -336,7 +336,7 @@ function wireEvents() {
     if (!state.lastOutputUrl) return;
     const a = document.createElement('a');
     a.href = state.lastOutputUrl;
-    a.download = `supertonic-${state.lang}-${state.voiceId}.wav`;
+    a.download = `sorigyeol-${state.lang}-${state.voiceId}.mp3`;
     a.click();
   });
 
@@ -557,6 +557,42 @@ function saveGenerationEstimate(elapsedSeconds, charCount) {
   } catch (_) {}
 }
 
+/* ================== MP3 encoding ================== */
+let lameJsPromise = null;
+async function loadLameJs() {
+  if (window.lamejs) return window.lamejs;
+  if (!lameJsPromise) {
+    lameJsPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js';
+      script.onload = () => window.lamejs ? resolve(window.lamejs) : reject(new Error('MP3 인코더를 불러오지 못했습니다.'));
+      script.onerror = () => reject(new Error('MP3 인코더 다운로드에 실패했습니다. 인터넷 연결을 확인해 주세요.'));
+      document.head.appendChild(script);
+    });
+  }
+  return lameJsPromise;
+}
+
+async function encodeMp3(samples, sampleRate) {
+  const lamejs = await loadLameJs();
+  const encoder = new lamejs.Mp3Encoder(1, sampleRate, 128);
+  const chunkSize = 1152;
+  const mp3Chunks = [];
+  for (let offset = 0; offset < samples.length; offset += chunkSize) {
+    const length = Math.min(chunkSize, samples.length - offset);
+    const pcm = new Int16Array(length);
+    for (let i = 0; i < length; i++) {
+      const value = Math.max(-1, Math.min(1, samples[offset + i]));
+      pcm[i] = value < 0 ? value * 32768 : value * 32767;
+    }
+    const encoded = encoder.encodeBuffer(pcm);
+    if (encoded.length) mp3Chunks.push(new Uint8Array(encoded));
+  }
+  const finalChunk = encoder.flush();
+  if (finalChunk.length) mp3Chunks.push(new Uint8Array(finalChunk));
+  return new Blob(mp3Chunks, { type: 'audio/mpeg' });
+}
+
 /* ================== Main synthesis ================== */
 
 async function generateSpeech() {
@@ -601,8 +637,9 @@ async function generateSpeech() {
     );
     const wavLen = Math.floor(state.tts.sampleRate * duration[0]);
     const wavOut = wav.slice(0, wavLen);
-    const buf = writeWavFile(wavOut, state.tts.sampleRate);
-    const blob = new Blob([buf], { type: 'audio/wav' });
+    dom.generateLabel.textContent = 'MP3 파일로 변환 중…';
+    const mp3 = await encodeMp3(wavOut, state.tts.sampleRate);
+    const blob = new Blob([mp3], { type: 'audio/mpeg' });
 
     if (state.lastOutputUrl) URL.revokeObjectURL(state.lastOutputUrl);
     state.lastOutputUrl = URL.createObjectURL(blob);
