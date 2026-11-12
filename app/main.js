@@ -220,9 +220,9 @@ function updateCharCount() {
     dom.charCount.textContent = t('char_count_en', {
       words: words.toLocaleString(),
       chars: chars.toLocaleString()
-    });
+    }) + ' / 200,000';
   } else {
-    dom.charCount.textContent = t('char_count_ko', { chars: chars.toLocaleString() });
+    dom.charCount.textContent = t('char_count_ko', { chars: chars.toLocaleString() }) + ' / 200,000';
   }
 }
 
@@ -588,8 +588,6 @@ function appendMp3Samples(encoder, samples, mp3Chunks) {
     if (encoded.length) mp3Chunks.push(new Uint8Array(encoded));
   }
 }
-
-/* ================== Main synthesis ================== */
 
 /* ================== Main synthesis ================== */
 
