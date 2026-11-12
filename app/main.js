@@ -57,6 +57,7 @@ const LANGS = {
 
 const DEFAULT_VOICE_ID = 'F1';
 const DEFAULT_LANG = 'ko';
+const MAX_TEXT_CHARS = 200000;
 
 const VOICE_DESC = {
   F1: { ko: '맑고 깨끗한 여성 톤', en: 'Bright & clear female tone', ja: '明るく澄んだ女性の声' },
@@ -365,6 +366,7 @@ async function ingestFile(file) {
   try {
     const text = await extractTextFromFile(file);
     if (!text.trim()) throw new Error(t('error_file_empty'));
+    if (text.trim().length > MAX_TEXT_CHARS) throw new Error('파일은 최대 200,000자까지만 불러올 수 있습니다.');
     dom.text.value = text.trim();
     updateCharCount();
   } catch (err) {
@@ -573,11 +575,8 @@ async function loadLameJs() {
   return lameJsPromise;
 }
 
-async function encodeMp3(samples, sampleRate) {
-  const lamejs = await loadLameJs();
-  const encoder = new lamejs.Mp3Encoder(1, sampleRate, 128);
+function appendMp3Samples(encoder, samples, mp3Chunks) {
   const chunkSize = 1152;
-  const mp3Chunks = [];
   for (let offset = 0; offset < samples.length; offset += chunkSize) {
     const length = Math.min(chunkSize, samples.length - offset);
     const pcm = new Int16Array(length);
@@ -588,10 +587,9 @@ async function encodeMp3(samples, sampleRate) {
     const encoded = encoder.encodeBuffer(pcm);
     if (encoded.length) mp3Chunks.push(new Uint8Array(encoded));
   }
-  const finalChunk = encoder.flush();
-  if (finalChunk.length) mp3Chunks.push(new Uint8Array(finalChunk));
-  return new Blob(mp3Chunks, { type: 'audio/mpeg' });
 }
+
+/* ================== Main synthesis ================== */
 
 /* ================== Main synthesis ================== */
 
@@ -601,6 +599,10 @@ async function generateSpeech() {
   if (!text) {
     showError(t('error_no_text'));
     dom.text.focus();
+    return;
+  }
+  if (text.length > MAX_TEXT_CHARS) {
+    showError('최대 200,000자까지 변환할 수 있습니다. 글자 수를 줄여 주세요.');
     return;
   }
   if (!state.tts) {
@@ -622,9 +624,15 @@ async function generateSpeech() {
   const timerId = window.setInterval(() => {
     dom.genTimer.textContent = `생성 시간: ${((performance.now() - start) / 1000).toFixed(1)}초`;
   }, 100);
+
   try {
     const style = await ensureStyleLoaded(state.voiceId);
-    const { wav, duration } = await state.tts.call(
+    dom.generateLabel.textContent = 'MP3 인코더 준비 중…';
+    const lamejs = await loadLameJs();
+    const encoder = new lamejs.Mp3Encoder(1, state.tts.sampleRate, 128);
+    const mp3Chunks = [];
+
+    const result = await state.tts.call(
       text,
       state.lang,
       style,
@@ -633,13 +641,19 @@ async function generateSpeech() {
       0.3,
       (step, total) => {
         dom.generateLabel.textContent = t('btn_generating_progress', { step, total });
+      },
+      (audioPart, chunkIndex, chunkTotal) => {
+        appendMp3Samples(encoder, audioPart, mp3Chunks);
+        if (chunkIndex && chunkTotal) {
+          dom.generateLabel.textContent = `음성 생성 중… ${chunkIndex.toLocaleString()} / ${chunkTotal.toLocaleString()}`;
+        }
       }
     );
-    const wavLen = Math.floor(state.tts.sampleRate * duration[0]);
-    const wavOut = wav.slice(0, wavLen);
-    dom.generateLabel.textContent = 'MP3 파일로 변환 중…';
-    const mp3 = await encodeMp3(wavOut, state.tts.sampleRate);
-    const blob = new Blob([mp3], { type: 'audio/mpeg' });
+
+    const finalChunk = encoder.flush();
+    if (finalChunk.length) mp3Chunks.push(new Uint8Array(finalChunk));
+    dom.generateLabel.textContent = 'MP3 파일 마무리 중…';
+    const blob = new Blob(mp3Chunks, { type: 'audio/mpeg' });
 
     if (state.lastOutputUrl) URL.revokeObjectURL(state.lastOutputUrl);
     state.lastOutputUrl = URL.createObjectURL(blob);
@@ -648,7 +662,7 @@ async function generateSpeech() {
     dom.transcript.textContent = text;
     saveGenerationEstimate((performance.now() - start) / 1000, text.length);
     updateGenerationEstimate();
-    dom.statAudio.textContent = t('output_audio_stat', { seconds: duration[0].toFixed(2) });
+    dom.statAudio.textContent = t('output_audio_stat', { seconds: result.duration[0].toFixed(2) });
     dom.statGen.textContent = t('output_gen_stat', {
       seconds: ((performance.now() - start) / 1000).toFixed(2)
     });
