@@ -273,31 +273,52 @@ export class TextToSpeech {
         return { wav, duration };
     }
 
-    async call(text, lang, style, totalStep, speed = 1.05, silenceDuration = 0.3, progressCallback = null) {
+    async call(text, lang, style, totalStep, speed = 1.05, silenceDuration = 0.3, progressCallback = null, audioChunkCallback = null) {
         if (style.ttl.dims[0] !== 1) {
             throw new Error('Single speaker text to speech only supports single style');
         }
         const maxLen = (lang === 'ko' || lang === 'ja') ? 120 : 300;
         const textList = chunkText(text, maxLen);
         const langList = new Array(textList.length).fill(lang);
-        let wavCat = [];
+        const wavParts = audioChunkCallback ? null : [];
+        let totalWavLength = 0;
         let durCat = 0;
-        
+
         for (let i = 0; i < textList.length; i++) {
             const { wav, duration } = await this._infer([textList[i]], [langList[i]], style, totalStep, speed, progressCallback);
-            
-            if (wavCat.length === 0) {
-                wavCat = wav;
-                durCat = duration[0];
-            } else {
+
+            if (i > 0) {
                 const silenceLen = Math.floor(silenceDuration * this.sampleRate);
-                const silence = new Array(silenceLen).fill(0);
-                wavCat = [...wavCat, ...silence, ...wav];
-                durCat += duration[0] + silenceDuration;
+                if (audioChunkCallback) {
+                    audioChunkCallback(new Float32Array(silenceLen), i, textList.length);
+                } else {
+                    wavParts.push(new Float32Array(silenceLen));
+                    totalWavLength += silenceLen;
+                }
+                durCat += silenceDuration;
             }
+
+            const audioPart = Float32Array.from(wav);
+            if (audioChunkCallback) {
+                audioChunkCallback(audioPart, i + 1, textList.length);
+            } else {
+                wavParts.push(audioPart);
+                totalWavLength += audioPart.length;
+            }
+            durCat += duration[0];
         }
-        
-        return { wav: wavCat, duration: [durCat] };
+
+        if (audioChunkCallback) {
+            return { wav: null, duration: [durCat], chunks: textList.length };
+        }
+
+        const wavCat = new Float32Array(totalWavLength);
+        let writeOffset = 0;
+        for (const part of wavParts) {
+            wavCat.set(part, writeOffset);
+            writeOffset += part.length;
+        }
+        return { wav: Array.from(wavCat), duration: [durCat], chunks: textList.length };
     }
 
     async batch(textList, langList, style, totalStep, speed = 1.05, progressCallback = null) {
@@ -482,38 +503,36 @@ function chunkText(text, maxLen = 300) {
     if (typeof text !== 'string') {
         throw new Error(`chunkText expects a string, got ${typeof text}`);
     }
-    
-    // Split by paragraph (two or more newlines)
-    const paragraphs = text.trim().split(/\n\s*\n+/).filter(p => p.trim());
-    
+
+    // Split by Unicode characters so surrogate pairs are never cut in half.
+    const chars = Array.from(text.trim());
     const chunks = [];
-    
-    for (let paragraph of paragraphs) {
-        paragraph = paragraph.trim();
-        if (!paragraph) continue;
-        
-        // Split by sentence boundaries (period, question mark, exclamation mark followed by space)
-        // But exclude common abbreviations like Mr., Mrs., Dr., etc. and single capital letters like F.
-        const sentences = paragraph.split(/(?<!Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.|Sr\.|Jr\.|Ph\.D\.|etc\.|e\.g\.|i\.e\.|vs\.|Inc\.|Ltd\.|Co\.|Corp\.|St\.|Ave\.|Blvd\.)(?<!\b[A-Z]\.)(?<=[.!?])\s+/);
-        
-        let currentChunk = "";
-        
-        for (let sentence of sentences) {
-            if (currentChunk.length + sentence.length + 1 <= maxLen) {
-                currentChunk += (currentChunk ? " " : "") + sentence;
-            } else {
-                if (currentChunk) {
-                    chunks.push(currentChunk.trim());
+    let offset = 0;
+
+    while (offset < chars.length) {
+        let end = Math.min(offset + maxLen, chars.length);
+
+        if (end < chars.length) {
+            // Prefer a natural break near the end of the chunk.
+            const searchFloor = offset + Math.floor(maxLen * 0.7);
+            let boundary = -1;
+            for (let i = end - 1; i >= searchFloor; i--) {
+                if (/\s/.test(chars[i]) || /[.!?。！？,，;；:：]/.test(chars[i])) {
+                    boundary = i + 1;
+                    break;
                 }
-                currentChunk = sentence;
             }
+            if (boundary > offset) end = boundary;
         }
-        
-        if (currentChunk) {
-            chunks.push(currentChunk.trim());
-        }
+
+        const part = chars.slice(offset, end).join('').trim();
+        if (part) chunks.push(part);
+        offset = end;
+
+        // Skip whitespace between chunks; it is not useful to synthesize alone.
+        while (offset < chars.length && /\s/.test(chars[offset])) offset++;
     }
-    
+
     return chunks;
 }
 
