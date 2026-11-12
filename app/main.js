@@ -105,6 +105,7 @@ const dom = {
   generateBtn: $('#generateBtn'),
   generateLabel: $('#generateLabel'),
   genTimer: $('#genTimer'),
+  genEstimate: $('#genEstimate'),
   errorMsg: $('#errorMsg'),
   output: $('#output'),
   audio: $('#audio'),
@@ -128,6 +129,7 @@ window.addEventListener('DOMContentLoaded', () => {
   wireEvents();
   dom.text.value = LANGS[state.lang].presets[0];
   updateCharCount();
+  updateGenerationEstimate();
   initialiseModels();
 
   // Set initial slider label values
@@ -233,11 +235,13 @@ function setActiveLang(lang) {
   });
   renderPresets();
   updateCharCount();
+  updateGenerationEstimate();
 }
 
 function setActiveVoice(voiceId) {
   if (!VOICES.find((v) => v.id === voiceId)) return;
   state.voiceId = voiceId;
+  updateGenerationEstimate();
   document.querySelectorAll('.voice-chip').forEach((card) => {
     const isActive = card.dataset.voiceId === voiceId;
     card.classList.toggle('is-active', isActive);
@@ -279,7 +283,7 @@ function wireEvents() {
     setActiveVoice(voiceId);
   });
 
-  dom.text.addEventListener('input', updateCharCount);
+  dom.text.addEventListener('input', () => { updateCharCount(); updateGenerationEstimate(); });
   dom.text.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
@@ -293,11 +297,13 @@ function wireEvents() {
   if (qualityVal && dom.totalStep) {
     dom.totalStep.addEventListener('input', (e) => {
       qualityVal.textContent = e.target.value;
+      updateGenerationEstimate();
     });
   }
   if (speedVal && dom.speed) {
     dom.speed.addEventListener('input', (e) => {
       speedVal.textContent = parseFloat(e.target.value).toFixed(2) + 'x';
+      updateGenerationEstimate();
     });
   }
 
@@ -518,6 +524,39 @@ function clearPreviewIndicators() {
   state.currentPreviewKey = null;
 }
 
+
+/* ================== Generation time estimate ================== */
+function updateGenerationEstimate() {
+  if (!dom.genEstimate) return;
+  const chars = (dom.text?.value || '').trim().length;
+  if (!chars) { dom.genEstimate.textContent = '예상 생성 시간: 글을 입력하면 계산됩니다.'; return; }
+  const steps = clampInt(dom.totalStep?.value, 4, 16, 8);
+  const speed = clampFloat(dom.speed?.value, 0.7, 1.8, 1.05);
+  const key = `supertonic-estimate-${state.lang}-${state.voiceId}-${steps}-${speed.toFixed(2)}`;
+  let secondsPerChar = 0.035 * (steps / 8) / speed;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    if (saved && saved.samples >= 1 && saved.secondsPerChar > 0) secondsPerChar = saved.secondsPerChar;
+  } catch (_) {}
+  const estimate = Math.max(1, chars * secondsPerChar);
+  const low = Math.max(1, Math.floor(estimate * 0.75));
+  const high = Math.max(low + 1, Math.ceil(estimate * 1.35));
+  dom.genEstimate.textContent = `예상 생성 시간: 약 ${low}~${high}초 (기기 성능에 따라 달라질 수 있어요)`;
+}
+function saveGenerationEstimate(elapsedSeconds, charCount) {
+  if (!charCount || elapsedSeconds <= 0) return;
+  const steps = clampInt(dom.totalStep?.value, 4, 16, 8);
+  const speed = clampFloat(dom.speed?.value, 0.7, 1.8, 1.05);
+  const key = `supertonic-estimate-${state.lang}-${state.voiceId}-${steps}-${speed.toFixed(2)}`;
+  try {
+    const old = JSON.parse(localStorage.getItem(key) || 'null');
+    const measured = elapsedSeconds / charCount;
+    const samples = (old?.samples || 0) + 1;
+    const average = old?.secondsPerChar ? old.secondsPerChar * 0.65 + measured * 0.35 : measured;
+    localStorage.setItem(key, JSON.stringify({ samples, secondsPerChar: average }));
+  } catch (_) {}
+}
+
 /* ================== Main synthesis ================== */
 
 async function generateSpeech() {
@@ -570,6 +609,8 @@ async function generateSpeech() {
 
     dom.audio.src = state.lastOutputUrl;
     dom.transcript.textContent = text;
+    saveGenerationEstimate((performance.now() - start) / 1000, text.length);
+    updateGenerationEstimate();
     dom.statAudio.textContent = t('output_audio_stat', { seconds: duration[0].toFixed(2) });
     dom.statGen.textContent = t('output_gen_stat', {
       seconds: ((performance.now() - start) / 1000).toFixed(2)
