@@ -531,30 +531,49 @@ function clearPreviewIndicators() {
 function updateGenerationEstimate() {
   if (!dom.genEstimate) return;
   const chars = (dom.text?.value || '').trim().length;
-  if (!chars) { dom.genEstimate.textContent = '예상 생성 시간: 글을 입력하면 계산됩니다.'; return; }
+  if (!chars) {
+    dom.genEstimate.textContent = '예상 생성 시간: 글을 입력하면 계산됩니다.';
+    return;
+  }
+
   const steps = clampInt(dom.totalStep?.value, 4, 16, 8);
   const speed = clampFloat(dom.speed?.value, 0.7, 1.8, 1.05);
-  const key = `supertonic-estimate-${state.lang}-${state.voiceId}-${steps}-${speed.toFixed(2)}`;
+  const key = `supertonic-estimate-v2-${state.lang}-${state.voiceId}-${steps}-${speed.toFixed(2)}`;
+
+  // Ignore old calibration data: previous versions could store failed/abnormally long runs.
   let secondsPerChar = 0.035 * (steps / 8) / speed;
   try {
     const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    if (saved && saved.samples >= 1 && saved.secondsPerChar > 0) secondsPerChar = saved.secondsPerChar;
+    if (saved && saved.samples >= 1 &&
+        Number.isFinite(saved.secondsPerChar) &&
+        saved.secondsPerChar >= 0.005 &&
+        saved.secondsPerChar <= 0.15) {
+      secondsPerChar = saved.secondsPerChar;
+    }
   } catch (_) {}
+
   const estimate = Math.max(1, chars * secondsPerChar);
   const low = Math.max(1, Math.floor(estimate * 0.75));
   const high = Math.max(low + 1, Math.ceil(estimate * 1.35));
-  dom.genEstimate.textContent = `예상 생성 시간: 약 ${low}~${high}초 (기기 성능에 따라 달라질 수 있어요)`;
+  dom.genEstimate.textContent = `예상 생성 시간: 약 ${low.toLocaleString()}~${high.toLocaleString()}초 (대략적인 참고값이며 기기 성능에 따라 달라져요)`;
 }
+
 function saveGenerationEstimate(elapsedSeconds, charCount) {
   if (!charCount || elapsedSeconds <= 0) return;
   const steps = clampInt(dom.totalStep?.value, 4, 16, 8);
   const speed = clampFloat(dom.speed?.value, 0.7, 1.8, 1.05);
-  const key = `supertonic-estimate-${state.lang}-${state.voiceId}-${steps}-${speed.toFixed(2)}`;
+  const measured = elapsedSeconds / charCount;
+
+  // Do not learn from abnormal runs; they would corrupt every later estimate.
+  if (!Number.isFinite(measured) || measured < 0.005 || measured > 0.15) return;
+
+  const key = `supertonic-estimate-v2-${state.lang}-${state.voiceId}-${steps}-${speed.toFixed(2)}`;
   try {
     const old = JSON.parse(localStorage.getItem(key) || 'null');
-    const measured = elapsedSeconds / charCount;
     const samples = (old?.samples || 0) + 1;
-    const average = old?.secondsPerChar ? old.secondsPerChar * 0.65 + measured * 0.35 : measured;
+    const average = old?.secondsPerChar
+      ? old.secondsPerChar * 0.65 + measured * 0.35
+      : measured;
     localStorage.setItem(key, JSON.stringify({ samples, secondsPerChar: average }));
   } catch (_) {}
 }
