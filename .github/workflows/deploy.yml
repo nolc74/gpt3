@@ -31,6 +31,10 @@ jobs:
         env:
           VITE_BASE: /gpt3/
         run: npm run build
+      - name: Copy 달무리책방 site
+        run: |
+          mkdir -p dist/bookshop
+          tar -xzf bookshop.tar.gz -C dist/bookshop
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
