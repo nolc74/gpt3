@@ -34,7 +34,11 @@ jobs:
       - name: Copy 달무리책방 site
         run: |
           mkdir -p dist/bookshop
-          tar -xzf bookshop.tar.gz -C dist/bookshop
+          if tar -tzf bookshop.tar.gz >/dev/null 2>&1; then
+            tar -xzf bookshop.tar.gz -C dist/bookshop
+          else
+            echo "::warning::bookshop.tar.gz is invalid; skipping the optional bookshop bundle so the TTS site can still deploy."
+          fi
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
