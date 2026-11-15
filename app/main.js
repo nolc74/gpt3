@@ -782,13 +782,13 @@ function hideError() {
 
 function safeFileName(value) {
   const cleaned = String(value || '').trim()
-    .replace(/[\\\\/:*?"<>|\\u0000-\\u001f]/g, '-')
-    .replace(/\\s+/g, ' ')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/[\x00-\x1f]/g, '')
+    .replace(/\s+/g, ' ')
     .replace(/[. ]+$/g, '')
     .slice(0, 100);
   return cleaned || 'sorigyeol-audio';
 }
-
 function clampInt(raw, min, max, fallback) {
   const n = parseInt(raw, 10);
   if (Number.isNaN(n)) return fallback;
