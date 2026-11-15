@@ -97,6 +97,8 @@ const dom = {
   voiceGrid: $('#voiceGrid'),
   presets: $('#presets'),
   text: $('#text'),
+  audioTitle: $('#audioTitle'),
+  outputTitle: document.querySelector('#output .output-title'),
   textWrap: $('#textWrap'),
   charCount: $('#charCount'),
   fileInput: $('#fileInput'),
@@ -337,7 +339,7 @@ function wireEvents() {
     if (!state.lastOutputUrl) return;
     const a = document.createElement('a');
     a.href = state.lastOutputUrl;
-    a.download = `sorigyeol-${state.lang}-${state.voiceId}.mp3`;
+    a.download = `${safeFileName(dom.audioTitle?.value)}.mp3`;
     a.click();
   });
 
@@ -729,6 +731,7 @@ async function generateSpeech() {
     state.lastOutputUrl = URL.createObjectURL(blob);
 
     dom.audio.src = state.lastOutputUrl;
+    if (dom.outputTitle) dom.outputTitle.textContent = dom.audioTitle?.value.trim() || '결과';
     dom.transcript.textContent = text;
     saveGenerationEstimate((performance.now() - start) / 1000, text.length);
     updateGenerationEstimate();
@@ -775,6 +778,15 @@ function showError(msg) {
 }
 function hideError() {
   dom.errorMsg.innerHTML = '';
+}
+
+function safeFileName(value) {
+  const cleaned = String(value || '').trim()
+    .replace(/[\\\\/:*?"<>|\\u0000-\\u001f]/g, '-')
+    .replace(/\\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .slice(0, 100);
+  return cleaned || 'sorigyeol-audio';
 }
 
 function clampInt(raw, min, max, fallback) {
