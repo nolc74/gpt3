@@ -746,6 +746,12 @@ button {
   transition: var(--transition-smooth);
   word-break: keep-all;
 }
+.title-input {
+  min-height: 0;
+  height: 48px;
+  resize: none;
+}
+
 .text-input:focus {
   border-color: var(--accent);
   background: var(--surface-hover);
