@@ -117,7 +117,10 @@ const dom = {
   downloadBtn: $('#downloadBtn'),
   copyLinkBtn: $('#copyLinkBtn'),
   transcript: $('#transcript'),
-  localeToggle: $('#localeToggle')
+  localeToggle: $('#localeToggle'),
+  videoFiles: $('#videoFiles'),
+  videoLibraryList: $('#videoLibraryList'),
+  videoStorageStatus: $('#videoStorageStatus')
 };
 
 /* ================== Init ================== */
@@ -130,6 +133,10 @@ window.addEventListener('DOMContentLoaded', () => {
   renderVoices();
   renderPresets();
   wireEvents();
+  initialiseVideoLibrary().catch((err) => {
+    console.error(err);
+    dom.videoStorageStatus.textContent = '영상 보관함을 열지 못했습니다: ' + err.message;
+  });
   dom.text.value = LANGS[state.lang].presets[0];
   updateCharCount();
   updateGenerationEstimate();
@@ -335,6 +342,21 @@ function wireEvents() {
 
   dom.generateBtn.addEventListener('click', generateSpeech);
 
+  dom.videoFiles.addEventListener('change', async () => {
+    const files = Array.from(dom.videoFiles.files || []);
+    dom.videoFiles.value = '';
+    for (const file of files) {
+      if (!file.type.startsWith('video/')) continue;
+      try {
+        await saveVideoToLibrary(file);
+      } catch (err) {
+        console.error(err);
+        dom.videoStorageStatus.textContent = `저장 실패 (${file.name}): ${err.name === 'QuotaExceededError' ? '브라우저 저장 공간이 부족합니다.' : err.message}`;
+      }
+    }
+    await renderVideoLibrary();
+  });
+
   dom.downloadBtn.addEventListener('click', () => {
     if (!state.lastOutputUrl) return;
     const a = document.createElement('a');
@@ -390,6 +412,112 @@ async function extractTextFromFile(file) {
     return result.value || '';
   }
   throw new Error(t('error_file_unsupported'));
+}
+
+/* ================== Local video library ================== */
+const VIDEO_DB_NAME = 'sorigyeol-video-library';
+const VIDEO_STORE_NAME = 'videos';
+let videoDb = null;
+const videoObjectUrls = new Map();
+
+function openVideoDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(VIDEO_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(VIDEO_STORE_NAME)) {
+        db.createObjectStore(VIDEO_STORE_NAME, { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('브라우저 저장소를 열 수 없습니다.'));
+  });
+}
+
+async function initialiseVideoLibrary() {
+  videoDb = await openVideoDatabase();
+  await renderVideoLibrary();
+}
+
+function videoTransaction(mode, action) {
+  return new Promise((resolve, reject) => {
+    const tx = videoDb.transaction(VIDEO_STORE_NAME, mode);
+    const store = tx.objectStore(VIDEO_STORE_NAME);
+    let request;
+    try { request = action(store); } catch (err) { reject(err); return; }
+    tx.oncomplete = () => resolve(request?.result);
+    tx.onerror = () => reject(tx.error || request?.error || new Error('영상 저장 작업에 실패했습니다.'));
+    tx.onabort = () => reject(tx.error || new Error('영상 저장 작업이 취소됐습니다.'));
+  });
+}
+
+async function saveVideoToLibrary(file) {
+  const record = {
+    name: file.name,
+    type: file.type || 'video/mp4',
+    size: file.size,
+    addedAt: Date.now(),
+    blob: file
+  };
+  await videoTransaction('readwrite', store => store.add(record));
+  dom.videoStorageStatus.textContent = `저장 완료: ${file.name}`;
+}
+
+async function renderVideoLibrary() {
+  if (!videoDb) return;
+  const records = await videoTransaction('readonly', store => store.getAll()) || [];
+  dom.videoLibraryList.innerHTML = '';
+  if (!records.length) {
+    dom.videoLibraryList.textContent = '아직 저장된 영상이 없어. 위의 버튼으로 영상을 추가해 줘.';
+    dom.videoStorageStatus.textContent = '저장된 영상 0개';
+    return;
+  }
+  dom.videoStorageStatus.textContent = `저장된 영상 ${records.length}개 · 이 브라우저에 보관 중`;
+  for (const record of records) {
+    const card = document.createElement('article');
+    card.className = 'video-library-item';
+    const heading = document.createElement('div');
+    heading.className = 'video-library-heading';
+    const name = document.createElement('strong');
+    name.textContent = record.name;
+    const size = document.createElement('span');
+    size.textContent = formatVideoSize(record.size);
+    heading.append(name, size);
+
+    const player = document.createElement('video');
+    player.controls = true;
+    player.preload = 'metadata';
+    player.playsInline = true;
+    player.src = URL.createObjectURL(record.blob);
+    videoObjectUrls.set(record.id, player.src);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'ghost-btn video-delete';
+    remove.textContent = '삭제';
+    remove.addEventListener('click', async () => {
+      if (!window.confirm(`"${record.name}" 영상을 보관함에서 삭제할까?`)) return;
+      await videoTransaction('readwrite', store => store.delete(record.id));
+      const oldUrl = videoObjectUrls.get(record.id);
+      if (oldUrl) URL.revokeObjectURL(oldUrl);
+      videoObjectUrls.delete(record.id);
+      await renderVideoLibrary();
+    });
+    card.append(heading, player, remove);
+    dom.videoLibraryList.appendChild(card);
+  }
+}
+
+function formatVideoSize(bytes) {
+  if (!Number.isFinite(bytes)) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(unit ? 1 : 0)} ${units[unit]}`;
 }
 
 /* ================== Model loading ================== */
