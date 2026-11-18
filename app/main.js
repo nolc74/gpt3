@@ -930,11 +930,17 @@ function splitVoiceSegments(text, defaultVoiceId) {
     }
   };
 
+  // ® ... © selects the female F1 voice.
+  // × ... ÷ selects the male Leo (M3) voice.
+  // Text outside either marked section keeps the user's default voice.
   for (const char of text) {
     if (char === '®') {
       flush();
       activeVoiceId = 'F1';
-    } else if (char === '©') {
+    } else if (char === '×') {
+      flush();
+      activeVoiceId = 'M3';
+    } else if (char === '©' || char === '÷') {
       flush();
       activeVoiceId = defaultVoiceId;
     } else {
