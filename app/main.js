@@ -120,7 +120,10 @@ const dom = {
   localeToggle: $('#localeToggle'),
   videoFiles: $('#videoFiles'),
   videoLibraryList: $('#videoLibraryList'),
-  videoStorageStatus: $('#videoStorageStatus')
+  videoStorageStatus: $('#videoStorageStatus'),
+  combineVideosBtn: $('#combineVideosBtn'),
+  videoCombineStatus: $('#videoCombineStatus'),
+  combinedVideoResult: $('#combinedVideoResult')
 };
 
 /* ================== Init ================== */
@@ -357,6 +360,8 @@ function wireEvents() {
     await renderVideoLibrary();
   });
 
+  dom.combineVideosBtn.addEventListener('click', combineSelectedVideos);
+
   dom.downloadBtn.addEventListener('click', () => {
     if (!state.lastOutputUrl) return;
     const a = document.createElement('a');
@@ -466,7 +471,10 @@ async function saveVideoToLibrary(file) {
 async function renderVideoLibrary() {
   if (!videoDb) return;
   const records = await videoTransaction('readonly', store => store.getAll()) || [];
+  for (const oldUrl of videoObjectUrls.values()) URL.revokeObjectURL(oldUrl);
+  videoObjectUrls.clear();
   dom.videoLibraryList.innerHTML = '';
+  dom.combineVideosBtn.disabled = true;
   if (!records.length) {
     dom.videoLibraryList.textContent = '아직 저장된 영상이 없어. 위의 버튼으로 영상을 추가해 줘.';
     dom.videoStorageStatus.textContent = '저장된 영상 0개';
@@ -478,6 +486,14 @@ async function renderVideoLibrary() {
     card.className = 'video-library-item';
     const heading = document.createElement('div');
     heading.className = 'video-library-heading';
+    const selectLabel = document.createElement('label');
+    selectLabel.className = 'video-select-label';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'video-select';
+    checkbox.value = String(record.id);
+    checkbox.setAttribute('aria-label', record.name + ' 합성에 선택');
+    selectLabel.append(checkbox, document.createTextNode(' 합성 선택'));
     const name = document.createElement('strong');
     name.textContent = record.name;
     const size = document.createElement('span');
@@ -491,6 +507,14 @@ async function renderVideoLibrary() {
     player.src = URL.createObjectURL(record.blob);
     videoObjectUrls.set(record.id, player.src);
 
+    const actions = document.createElement('div');
+    actions.className = 'video-item-actions';
+    const download = document.createElement('button');
+    download.type = 'button';
+    download.className = 'ghost-btn';
+    download.textContent = '다시 다운로드';
+    download.addEventListener('click', () => downloadVideoBlob(record.blob, record.name));
+
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'ghost-btn video-delete';
@@ -503,9 +527,153 @@ async function renderVideoLibrary() {
       videoObjectUrls.delete(record.id);
       await renderVideoLibrary();
     });
-    card.append(heading, player, remove);
+    actions.append(download, remove);
+    heading.prepend(selectLabel);
+    card.append(heading, player, actions);
     dom.videoLibraryList.appendChild(card);
   }
+  dom.videoLibraryList.querySelectorAll('.video-select').forEach(input => {
+    input.addEventListener('change', updateCombineButton);
+  });
+}
+
+function updateCombineButton() {
+  const count = dom.videoLibraryList.querySelectorAll('.video-select:checked').length;
+  dom.combineVideosBtn.disabled = count < 2;
+  dom.combineVideosBtn.textContent = count >= 2 ? `선택한 영상 ${count}개 합치기` : '영상 2개 이상 선택하기';
+}
+
+function downloadVideoBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = safeFileName(name);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+async function combineSelectedVideos() {
+  const ids = Array.from(dom.videoLibraryList.querySelectorAll('.video-select:checked')).map(input => Number(input.value));
+  if (ids.length < 2) return;
+  dom.combineVideosBtn.disabled = true;
+  dom.videoCombineStatus.textContent = '선택한 영상을 준비하고 있어…';
+  dom.combinedVideoResult.classList.add('hidden');
+  let audioContext;
+  let recorder;
+  let combinedUrl = null;
+  try {
+    const records = (await videoTransaction('readonly', store => store.getAll())) || [];
+    const selected = ids.map(id => records.find(item => item.id === id)).filter(Boolean);
+    if (selected.length < 2) throw new Error('합칠 영상을 두 개 이상 찾지 못했어.');
+    const firstVideo = document.createElement('video');
+    firstVideo.muted = true;
+    firstVideo.playsInline = true;
+    firstVideo.preload = 'auto';
+    const firstUrl = URL.createObjectURL(selected[0].blob);
+    firstVideo.src = firstUrl;
+    await waitForVideoMetadata(firstVideo);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.min(firstVideo.videoWidth || 1280, 1920);
+    canvas.height = Math.round(canvas.width * (firstVideo.videoHeight || 720) / (firstVideo.videoWidth || 1280));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('영상 합성용 캔버스를 만들 수 없어.');
+    const canvasStream = canvas.captureStream(30);
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioDestination = audioContext.createMediaStreamDestination();
+    const outputStream = new MediaStream([...canvasStream.getVideoTracks(), ...audioDestination.stream.getAudioTracks()]);
+    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mimeType = mimeCandidates.find(type => MediaRecorder.isTypeSupported(type));
+    if (!mimeType) throw new Error('이 브라우저는 영상 합성을 지원하지 않아. Chrome 또는 Edge 최신 버전을 사용해 줘.');
+    const chunks = [];
+    recorder = new MediaRecorder(outputStream, { mimeType });
+    recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+    const stopped = new Promise((resolve, reject) => {
+      recorder.onstop = resolve;
+      recorder.onerror = () => reject(recorder.error || new Error('영상 녹화 중 오류가 발생했어.'));
+    });
+    await audioContext.resume();
+    recorder.start(1000);
+
+    for (let index = 0; index < selected.length; index++) {
+      dom.videoCombineStatus.textContent = `영상 합치는 중… ${index + 1}/${selected.length} · ${selected[index].name}`;
+      const video = document.createElement('video');
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.src = URL.createObjectURL(selected[index].blob);
+      const videoUrl = video.src;
+      try {
+        await waitForVideoMetadata(video);
+        const source = audioContext.createMediaElementSource(video);
+        source.connect(audioDestination);
+        await new Promise((resolve, reject) => {
+          video.onended = resolve;
+          video.onerror = () => reject(new Error(selected[index].name + ' 파일을 재생할 수 없어.'));
+          video.currentTime = 0;
+          video.play().then(resolve => { /* playback started */ }).catch(reject);
+          const draw = () => {
+            if (!video.paused && !video.ended) {
+              context.fillStyle = '#000';
+              context.fillRect(0, 0, canvas.width, canvas.height);
+              const scale = Math.min(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
+              const width = video.videoWidth * scale;
+              const height = video.videoHeight * scale;
+              context.drawImage(video, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+              requestAnimationFrame(draw);
+            }
+          };
+          requestAnimationFrame(draw);
+        });
+      } finally {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        URL.revokeObjectURL(videoUrl);
+      }
+    }
+    recorder.stop();
+    await stopped;
+    canvasStream.getTracks().forEach(track => track.stop());
+    outputStream.getTracks().forEach(track => track.stop());
+    const blob = new Blob(chunks, { type: mimeType });
+    if (!blob.size) throw new Error('합성 결과가 비어 있어. 다시 시도해 줘.');
+    const date = new Date().toISOString().replace(/[:.]/g, '-');
+    const name = `소리결_합성영상_${date}.webm`;
+    await videoTransaction('readwrite', store => store.add({ name, type: mimeType, size: blob.size, addedAt: Date.now(), blob }));
+    await renderVideoLibrary();
+    combinedUrl = URL.createObjectURL(blob);
+    const preview = document.createElement('video');
+    preview.controls = true;
+    preview.playsInline = true;
+    preview.src = combinedUrl;
+    const download = document.createElement('button');
+    download.type = 'button';
+    download.className = 'ghost-btn';
+    download.textContent = '합성 영상 다운로드';
+    download.addEventListener('click', () => downloadVideoBlob(blob, name));
+    dom.combinedVideoResult.replaceChildren(preview, download);
+    dom.combinedVideoResult.classList.remove('hidden');
+    dom.videoCombineStatus.textContent = `합성 완료! ${selected.length}개 영상을 하나로 합쳐 보관함에 저장했어.`;
+  } catch (err) {
+    console.error(err);
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    dom.videoCombineStatus.textContent = '합성 실패: ' + (err.message || '알 수 없는 오류');
+  } finally {
+    if (audioContext) await audioContext.close().catch(() => {});
+    dom.combineVideosBtn.disabled = false;
+    updateCombineButton();
+    if (combinedUrl) { /* preview keeps this URL until the next result is rendered */ }
+  }
+}
+
+function waitForVideoMetadata(video) {
+  return new Promise((resolve, reject) => {
+    if (video.readyState >= 1 && video.videoWidth) return resolve();
+    video.onloadedmetadata = () => resolve();
+    video.onerror = () => reject(new Error('영상 파일을 읽지 못했어. 지원되는 영상인지 확인해 줘.'));
+    video.load();
+  });
 }
 
 function formatVideoSize(bytes) {
