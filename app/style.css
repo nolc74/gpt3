@@ -1368,3 +1368,16 @@ input[type="range"]::-moz-range-thumb:hover {
 .video-library-heading span { flex: 0 0 auto; color: var(--ink-dim); font-size: var(--t-xs); }
 .video-library-item video { width: 100%; max-height: 320px; background: #000; border-radius: var(--r-sm); }
 .video-delete { align-self: flex-end; }
+
+
+/* ===== Video selection, downloads and local combining ===== */
+.video-combine-tools { display: grid; gap: 10px; margin: 12px 0 18px; padding: 14px; border: 1px solid var(--rule); border-radius: var(--r-md); }
+.video-combine-help { margin: 0; color: var(--ink-soft); font-size: var(--t-sm); line-height: 1.6; }
+.video-combine-btn { width: fit-content; min-height: 42px; padding: 10px 18px; }
+.video-select-label { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-soft); font-size: var(--t-xs); white-space: nowrap; }
+.video-select { accent-color: var(--accent); width: 16px; height: 16px; }
+.video-library-heading { flex-wrap: wrap; }
+.video-library-heading strong { flex: 1 1 100%; }
+.video-item-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.combined-video-result { display: grid; gap: 10px; }
+.combined-video-result video { width: 100%; max-height: 420px; background: #000; border-radius: var(--r-sm); }
