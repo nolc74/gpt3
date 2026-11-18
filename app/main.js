@@ -573,7 +573,11 @@ async function combineSelectedVideos() {
     firstVideo.preload = 'auto';
     const firstUrl = URL.createObjectURL(selected[0].blob);
     firstVideo.src = firstUrl;
-    await waitForVideoMetadata(firstVideo);
+    try {
+      await waitForVideoMetadata(firstVideo);
+    } finally {
+      URL.revokeObjectURL(firstUrl);
+    }
     const canvas = document.createElement('canvas');
     canvas.width = Math.min(firstVideo.videoWidth || 1280, 1920);
     canvas.height = Math.round(canvas.width * (firstVideo.videoHeight || 720) / (firstVideo.videoWidth || 1280));
@@ -611,7 +615,7 @@ async function combineSelectedVideos() {
           video.onended = resolve;
           video.onerror = () => reject(new Error(selected[index].name + ' 파일을 재생할 수 없어.'));
           video.currentTime = 0;
-          video.play().then(resolve => { /* playback started */ }).catch(reject);
+          video.play().then(() => {}).catch(reject);
           const draw = () => {
             if (!video.paused && !video.ended) {
               context.fillStyle = '#000';
