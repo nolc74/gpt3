@@ -215,6 +215,12 @@
             <span class="ghost-btn">+ 영상 추가하기</span>
           </label>
           <p id="videoStorageStatus" class="text-meta video-storage-status">저장된 영상을 불러오는 중…</p>
+          <div class="video-combine-tools">
+            <p class="video-combine-help">합칠 영상들을 선택한 뒤 순서를 정하고 합성해 줘. 선택한 순서대로 하나의 영상으로 이어 붙여.</p>
+            <button id="combineVideosBtn" class="primary-btn video-combine-btn" type="button" disabled>선택한 영상 합치기</button>
+            <p id="videoCombineStatus" class="text-meta" role="status" aria-live="polite"></p>
+            <div id="combinedVideoResult" class="combined-video-result hidden"></div>
+          </div>
           <div id="videoLibraryList" class="video-library-list"></div>
         </section>
       </section>
