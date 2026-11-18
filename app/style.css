@@ -1355,3 +1355,16 @@ input[type="range"]::-moz-range-thumb:hover {
 .hidden {
   display: none !important;
 }
+
+
+/* ===== Persistent local video library ===== */
+.video-library { margin-top: 18px; }
+.video-upload { margin: 10px 0; }
+.video-storage-status { display: inline-block; margin: 8px 0 12px; }
+.video-library-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.video-library-item { min-width: 0; padding: 12px; border: 1px solid var(--border-card); border-radius: var(--r-md); background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
+.video-library-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.video-library-heading strong { overflow-wrap: anywhere; }
+.video-library-heading span { flex: 0 0 auto; color: var(--ink-dim); font-size: var(--t-xs); }
+.video-library-item video { width: 100%; max-height: 320px; background: #000; border-radius: var(--r-sm); }
+.video-delete { align-self: flex-end; }
