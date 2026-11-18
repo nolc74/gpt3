@@ -204,6 +204,20 @@
           <p id="transcript" class="transcript-body"></p>
         </details>
       </section>
+      <section class="glass-card section video-library">
+        <section class="section">
+          <div class="section-label">
+            <span>내 영상 보관함</span>
+            <span class="label-hint">영상은 이 브라우저에 저장되며 새로고침해도 남아 있어요.</span>
+          </div>
+          <label class="file-pick video-upload">
+            <input id="videoFiles" type="file" accept="video/*" multiple hidden />
+            <span class="ghost-btn">+ 영상 추가하기</span>
+          </label>
+          <p id="videoStorageStatus" class="text-meta video-storage-status">저장된 영상을 불러오는 중…</p>
+          <div id="videoLibraryList" class="video-library-list"></div>
+        </section>
+      </section>
     </main>
 
     <footer class="footer" data-i18n-html="footer_html">
